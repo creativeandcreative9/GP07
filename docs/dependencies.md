@@ -29,4 +29,4 @@ Unity の [テキスト形式](https://docs.unity3d.com/Manual/FormatDescription
 
 ## 自作素材
 
-Orbit の geometry、UV、PNG、Prefab、meta、材質、tar は `scripts/generate-fixture.mjs` で生成します。形状は球・円柱・箱から構成したオリジナルのロボットです。PNG はスクリプトで生成した 8×8 チェッカーです。第三者のキャラクターや有料素材は含みません。生成物はこのプロジェクトの開発・試験用として再生成・改変できます。
+Orbit の geometry、UV、PNG、Prefab、meta、材質、tar は `scripts/generate-fixture.mjs` で生成します。バイナリ FBX はアプリの読み取り処理とは独立した `scripts/fbx-binary.mjs` で書き出します。圧縮は Node.js の zlib、アプリの展開検査はブラウザ標準 DecompressionStream を使います。形状は球・円柱・箱から構成したオリジナルのロボットです。PNG はスクリプトで生成した 8×8 チェッカーです。第三者のキャラクターや有料素材は含みません。生成物はこのプロジェクトの開発・試験用として再生成・改変できます。

@@ -6,6 +6,9 @@ export const LIMITS = {
   text: 1024 ** 2,
   vertices: 500_000,
   indices: 1_500_000,
+  fbx: 16 * 1024 ** 2,
+  fbxExpanded: 64 * 1024 ** 2,
+  fbxScalars: 4_500_000,
   imageSide: 4096,
   pixels: 32_000_000,
   timeout: 15_000,
@@ -37,6 +40,7 @@ export interface MaterialInfo {
 }
 export interface MeshData {
   name: string;
+  format: string;
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;

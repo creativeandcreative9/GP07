@@ -1,7 +1,20 @@
 declare module "*.mjs" {
   export const GUID: Record<string, string>;
   export function fixture(): Uint8Array;
-  export function fixtureEntries(): [string, Uint8Array | string, string?][];
+  export function fixtureEntries(
+    meshData?: Uint8Array | string,
+  ): [string, Uint8Array | string, string?][];
+  export function binaryMesh(compressed?: boolean): Uint8Array;
+  export function binaryFixture(compressed?: boolean): Uint8Array;
+  export interface BinaryNode {
+    name: string;
+    props?: [string, number | string | number[]][];
+    children?: BinaryNode[];
+  }
+  export function binaryFbx(
+    nodes: BinaryNode[],
+    compressed?: boolean,
+  ): Uint8Array;
   export function tar(
     entries: [string, Uint8Array | string, string?][],
   ): Uint8Array;

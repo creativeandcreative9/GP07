@@ -3,6 +3,7 @@ import { BoxGeometry, SphereGeometry, CylinderGeometry, Matrix4 } from "three";
 import { gzipSync, deflateSync } from "node:zlib";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { binaryFbx } from "./fbx-binary.mjs";
 
 export const GUID = {
   mesh: "a1000000000000000000000000000001",
@@ -223,12 +224,12 @@ export function tar(entries) {
   blocks.push(Buffer.alloc(1024));
   return Buffer.concat(blocks);
 }
-export function fixtureEntries() {
+export function fixtureEntries(meshData = fbx) {
   const assets = [
     [
       GUID.mesh,
       "Orbit.fbx",
-      fbx,
+      meshData,
       `ModelImporter:\n  internalIDToNameTable:\n  - first: {43: 4300000}\n    second: Orbit\n`,
     ],
     [
@@ -262,10 +263,146 @@ export function fixture() {
   return gzipSync(tar(fixtureEntries()), { level: 9 });
 }
 
+export function binaryMesh(compressed = true) {
+  const n = (name, props = [], children = []) => ({ name, props, children });
+  const s = (value) => ["S", value];
+  const i = (value) => ["I", value];
+  const d = (value) => ["D", value];
+  const l = (value) => ["L", value];
+  const p = (name, type, values) =>
+    n("P", [s(name), s(type), s(""), s("A"), ...values.map(d)]);
+  const layer = (name, mapping, dataName, data, type) =>
+    n(
+      name,
+      [i(0)],
+      [
+        n("Version", [i(101)]),
+        n("Name", [s("")]),
+        n("MappingInformationType", [s(mapping)]),
+        n("ReferenceInformationType", [
+          s(name === "LayerElementMaterial" ? "IndexToDirect" : "Direct"),
+        ]),
+        n(dataName, [[type, data]]),
+      ],
+    );
+  // The same six-decimal values as the ASCII fixture, for exact geometry comparison.
+  const rounded = (values) => values.map((v) => Number(v.toFixed(6)));
+  return binaryFbx(
+    [
+      n(
+        "FBXHeaderExtension",
+        [],
+        [n("FBXHeaderVersion", [i(1003)]), n("FBXVersion", [i(7400)])],
+      ),
+      n(
+        "GlobalSettings",
+        [],
+        [
+          n("Version", [i(1000)]),
+          n(
+            "Properties70",
+            [],
+            [
+              p("UpAxis", "int", [1]),
+              p("UpAxisSign", "int", [1]),
+              p("UnitScaleFactor", "double", [1]),
+            ],
+          ),
+        ],
+      ),
+      n(
+        "Objects",
+        [],
+        [
+          n(
+            "Geometry",
+            [l(100), s("Orbit\0\x01Geometry"), s("Mesh")],
+            [
+              n("Vertices", [["d", rounded(vertices)]]),
+              n("PolygonVertexIndex", [["i", indices]]),
+              layer(
+                "LayerElementNormal",
+                "ByPolygonVertex",
+                "Normals",
+                rounded(normals),
+                "d",
+              ),
+              layer(
+                "LayerElementUV",
+                "ByPolygonVertex",
+                "UV",
+                rounded(uvs),
+                "d",
+              ),
+              layer(
+                "LayerElementMaterial",
+                "ByPolygon",
+                "Materials",
+                materials,
+                "i",
+              ),
+            ],
+          ),
+          n(
+            "Model",
+            [l(200), s("Orbit\0\x01Model"), s("Mesh")],
+            [
+              n("Version", [i(232)]),
+              n(
+                "Properties70",
+                [],
+                [
+                  p("Lcl Translation", "Lcl Translation", [0, 0, 0]),
+                  p("Lcl Rotation", "Lcl Rotation", [0, 0, 0]),
+                  p("Lcl Scaling", "Lcl Scaling", [1, 1, 1]),
+                ],
+              ),
+              n("Shading", [["C", 1]]),
+              n("Culling", [s("CullingOff")]),
+            ],
+          ),
+          ...[0, 1, 2].map((slot) =>
+            n(
+              "Material",
+              [l(300 + slot), s(`Slot${slot}\0\x01Material`), s("")],
+              [
+                n("Version", [i(102)]),
+                n("ShadingModel", [s("phong")]),
+                n("Properties70", [], [p("DiffuseColor", "Color", [1, 1, 1])]),
+              ],
+            ),
+          ),
+        ],
+      ),
+      n(
+        "Connections",
+        [],
+        [
+          [100, 200],
+          [200, 0],
+          [300, 200],
+          [301, 200],
+          [302, 200],
+        ].map(([a, b]) => n("C", [s("OO"), l(a), l(b)])),
+      ),
+    ],
+    compressed,
+  );
+}
+
+export function binaryFixture(compressed = true) {
+  return gzipSync(tar(fixtureEntries(binaryMesh(compressed))), { level: 9 });
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dir = new URL("../public/fixtures/", import.meta.url);
   await mkdir(dir, { recursive: true });
   const bytes = fixture();
   await writeFile(new URL("orbit.unitypackage", dir), bytes);
   console.log(`Generated original Orbit fixture: ${bytes.length} bytes`);
+  const binary = binaryFixture();
+  await writeFile(new URL("orbit-binary.unitypackage", dir), binary);
+  console.log(
+    `Generated original binary Orbit fixture: ${binary.length} bytes`,
+  );
 }

@@ -79,7 +79,7 @@ function report(data: SceneData) {
   target.append(warn);
   const refs = document.createElement("p");
   refs.className = "reference";
-  refs.textContent = `Mesh fileID ${data.source.mesh.fileID} → ${data.mesh.name} · ${data.materials.length} 素材スロットを GUID で解決`;
+  refs.textContent = `Mesh fileID ${data.source.mesh.fileID} → ${data.mesh.name} · ${data.materials.length} 素材スロットを GUID で解決 · ${data.mesh.format}`;
   target.append(refs);
   const disclosure = document.createElement("details"),
     summary = document.createElement("summary");
@@ -116,7 +116,7 @@ async function load(file: File | "demo") {
     let bytes: ArrayBuffer, name: string;
     if (file === "demo") {
       fetchController = new AbortController();
-      const response = await fetch("/fixtures/orbit.unitypackage", {
+      const response = await fetch("/fixtures/orbit-binary.unitypackage", {
         signal: fetchController.signal,
       });
       if (!response.ok) throw new Error("デモを取得できませんでした。");

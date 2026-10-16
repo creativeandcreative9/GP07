@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import {
   fixture,
   fixtureEntries,
+  binaryFixture,
+  binaryMesh,
   GUID,
   tar,
 } from "../../scripts/generate-fixture.mjs";
@@ -169,7 +171,7 @@ test("cancel and newer selections invalidate old asynchronous results", async ({
   const pending = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/fixtures/orbit.unitypackage", async (route) => {
+  await page.route("**/fixtures/orbit*.unitypackage", async (route) => {
     await pending;
     await route.fulfill({ body: Buffer.from(fixture()) }).catch(() => {});
   });
@@ -191,7 +193,7 @@ test("15 second processing deadline is visible and cancellable", async ({
 }) => {
   await page.clock.install();
   await page.goto("/");
-  await page.route("**/fixtures/orbit.unitypackage", (route) =>
+  await page.route("**/fixtures/orbit*.unitypackage", (route) =>
     route.abort("timedout"),
   );
   // Delay fetch in the browser so the deadline, not a network error, wins.
@@ -203,6 +205,47 @@ test("15 second processing deadline is visible and cancellable", async ({
   await expect(page.getByRole("alert")).toContainText("15 秒");
   await page.getByRole("button", { name: "閉じる", exact: true }).click();
   await expect(page.locator("#empty")).toBeVisible();
+});
+
+test("compressed binary FBX matches the ASCII render and malformed binary can recover", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.locator("#file").setInputFiles(upload());
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await expect(page.locator("#report")).toContainText("ASCII FBX 7.4");
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const ascii = await page.locator("canvas").screenshot();
+  const requests: string[] = [];
+  page.on("request", (r) =>
+    requests.push(`${r.method()} ${r.url()} ${r.postData() ?? ""}`),
+  );
+  await page
+    .locator("#file")
+    .setInputFiles(upload(binaryFixture(), "binary.unitypackage"));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await expect(page.locator("#report")).toContainText("Binary FBX 7.4");
+  await page.waitForTimeout(300);
+  expect((await page.locator("canvas").screenshot()).equals(ascii)).toBe(true);
+  await page.screenshot({
+    path: "docs/evidence/orbit-binary.png",
+    fullPage: true,
+  });
+  expect(
+    requests.every((r) => r.startsWith("GET http://127.0.0.1:4173/assets/")),
+  ).toBe(true);
+  const broken = new Uint8Array(binaryMesh());
+  new DataView(broken.buffer).setUint32(27, 0xffffffff, true);
+  await page
+    .locator("#file")
+    .setInputFiles(upload(gzipSync(tar(fixtureEntries(broken)))));
+  await expect(page.getByRole("alert")).toContainText("境界");
+  await page.locator("#file").setInputFiles(upload(binaryFixture(false)));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  expect(errors).toEqual([]);
 });
 
 test("mobile layout fits the viewport and can load a model", async ({

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#211d2d" />
+    <meta
+      name="description"
+      content="Unity を起動せず、ローカルの unitypackage を確認する限定トゥーンビューア。"
+    />
+    <title>GP07 — Character studio</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="GP07 ホーム"
+          ><span class="brand-mark">g<span>p</span></span
+          ><span>GP07<small>CHARACTER STUDIO</small></span></a
+        >
+        <div class="project-name">
+          <span class="divider"></span>ブラウザキャラクタービューア
+          <span class="badge">PROTOTYPE 01</span>
+        </div>
+        <span class="local"><i></i>ブラウザ内で処理</span>
+      </header>
+      <main class="workspace">
+        <aside class="sidebar">
+          <div class="eyebrow">YOUR WORKSPACE</div>
+          <h1>キャラクターを、<br />もっと身近に。</h1>
+          <p class="intro">
+            Unity を開く前に、かたちと素材をチェック。<br />ファイルはこのブラウザの中だけで処理します。
+          </p>
+          <section class="import-section" aria-labelledby="import-heading">
+            <h2 id="import-heading"><span>01</span> パッケージを開く</h2>
+            <label class="dropzone" id="dropzone" for="file"
+              ><span class="upload-icon" aria-hidden="true"
+                ><svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                >
+                  <path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5" /></svg></span
+              ><strong>.unitypackage を選択</strong
+              ><small>または、ここにドラッグ＆ドロップ</small
+              ><span class="file-limit">最大 32 MiB · 単一ファイル</span></label
+            >
+            <input id="file" type="file" accept=".unitypackage" />
+            <div class="or"><span></span> まずは試してみる <span></span></div>
+            <button id="demo" class="demo-button">
+              <span class="demo-symbol">✦</span
+              ><span
+                >Orbit を読み込む<small>自作のテストキャラクター</small></span
+              ><span class="arrow">↗</span>
+            </button>
+          </section>
+          <section class="scope-note">
+            <span class="note-icon">i</span>
+            <div>
+              <strong>小さく、確かめるための試作です。</strong>
+              <p>
+                静的 ASCII FBX 7.4、単純な
+                Prefab、限定トゥーン描画に対応。一般的なアバター、スキニング、透過は未対応です。
+              </p>
+            </div>
+          </section>
+          <div class="sidebar-bottom">
+            <span class="tiny-square"></span> NO UPLOAD. NO ACCOUNT.
+            <p>あなたの素材を、あなたの手元に。</p>
+          </div>
+        </aside>
+        <section class="studio" aria-label="プレビュースタジオ">
+          <div class="studio-toolbar">
+            <div>
+              <span class="eyebrow">PREVIEW</span>
+              <h2 id="model-name">プレビュー</h2>
+            </div>
+            <div class="toolbar-actions">
+              <span class="mode-tag">TOON / 静止</span
+              ><button id="clear" class="text-button" disabled>クリア</button>
+            </div>
+          </div>
+          <div class="viewport" id="viewport">
+            <div class="viewport-label">
+              <span class="dot"></span> PERSPECTIVE
+              <span class="view-axis">Y ↑</span>
+            </div>
+            <div id="empty" class="empty-state">
+              <div class="empty-orbit"><span>✦</span></div>
+              <h3>最初のキャラクターを迎えよう。</h3>
+              <p>パッケージを選ぶか、Orbit で表示を試せます。</p>
+              <button id="empty-demo" class="primary-button">
+                デモを体験する <span>↗</span>
+              </button>
+            </div>
+            <div id="loading" class="loading-state" hidden>
+              <span class="spinner"></span
+              ><strong>パッケージを解析しています</strong>
+              <p>参照とファイルの安全性を確認中…</p>
+              <button id="cancel" class="secondary-button">キャンセル</button>
+            </div>
+            <div id="error" class="error-state" role="alert" hidden>
+              <span>!</span>
+              <h3>読み込めませんでした</h3>
+              <p id="error-message"></p>
+              <button id="dismiss" class="secondary-button">閉じる</button>
+            </div>
+            <div class="camera-tools">
+              <button id="rotate-left" aria-label="左に回転" title="左に回転">
+                ↶</button
+              ><button id="rotate-right" aria-label="右に回転" title="右に回転">
+                ↷</button
+              ><span></span
+              ><button id="zoom-in" aria-label="拡大" title="拡大">＋</button
+              ><button id="zoom-out" aria-label="縮小" title="縮小">−</button
+              ><button
+                id="reset"
+                aria-label="カメラをリセット"
+                title="カメラをリセット"
+              >
+                ⌖
+              </button>
+            </div>
+            <div class="viewport-footer">
+              <span id="mesh-stats">モデル未選択</span
+              ><span>ドラッグで回転 <b>·</b> スクロールでズーム</span>
+            </div>
+          </div>
+          <div class="statusbar" role="status" aria-live="polite">
+            <span id="status-dot" class="dot"></span
+            ><span id="status">ファイルの選択を待っています</span
+            ><span class="status-version">GP07 / 0.1</span>
+          </div>
+          <section class="render-controls" aria-labelledby="render-heading">
+            <div>
+              <span class="eyebrow">LOOK & FEEL</span>
+              <h2 id="render-heading">表示を調整</h2>
+            </div>
+            <label class="color-control"
+              >基本色<input
+                id="color"
+                type="color"
+                value="#a382db"
+                disabled /></label
+            ><label class="switch-control"
+              >トゥーン影<input
+                id="shadow"
+                type="checkbox"
+                checked
+                disabled /><span class="switch"></span></label
+            ><label class="switch-control"
+              >輪郭線<input
+                id="outline"
+                type="checkbox"
+                checked
+                disabled /><span class="switch"></span></label
+            ><label class="range-control"
+              >線の幅<input
+                id="width"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                value="1"
+                disabled /></label
+            ><label class="range-control"
+              >ライト<input
+                id="light"
+                type="range"
+                min="-180"
+                max="180"
+                value="-30"
+                disabled
+            /></label>
+          </section>
+          <section class="details">
+            <div class="detail-heading">
+              <h2>読み込みレポート</h2>
+              <span>対応範囲と参照を確認</span>
+            </div>
+            <div id="report" class="report-empty">
+              読み込んだアセットと警告がここに表示されます。
+            </div>
+          </section>
+        </section>
+      </main>
+      <footer class="page-footer">
+        <span>GP07 <b>／</b> A little closer to your character.</span
+        ><span>lilToon の限定近似 · Unity との外観比較は未検証</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

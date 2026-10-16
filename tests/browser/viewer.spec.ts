@@ -4,6 +4,8 @@ import {
   fixtureEntries,
   binaryFixture,
   binaryMesh,
+  hierarchyFixture,
+  hierarchyNodes,
   GUID,
   tar,
 } from "../../scripts/generate-fixture.mjs";
@@ -31,7 +33,12 @@ test("demo renders, controls change the pixels, reset/clear/reload work", async 
   await expect(page.locator("#report")).toContainText(
     "Mesh fileID 4300000 → Orbit",
   );
-  await expect(page.locator("#mesh-stats")).toContainText("3 materials");
+  await expect(page.locator("#mesh-stats")).toContainText(
+    "4 materials · 3 parts",
+  );
+  await expect(page.locator("#report")).toContainText(
+    "OrbitRig/Accessories/RightBeacon",
+  );
   const canvas = page.locator("canvas");
   await page.waitForTimeout(400);
   const original = await canvas.screenshot();
@@ -262,4 +269,60 @@ test("mobile layout fits the viewport and can load a model", async ({
     path: "docs/evidence/orbit-mobile.png",
     fullPage: true,
   });
+});
+
+test("hierarchical parts move, hide, render names safely and recover from broken links", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page
+    .locator("#file")
+    .setInputFiles(upload(hierarchyFixture(), "parts.unitypackage"));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await expect(page.locator("#mesh-stats")).toContainText(
+    "9,468 vertices · 4 materials · 3 parts",
+  );
+  await expect(page.locator("#report")).toContainText(
+    "Mesh fileID 4300001 → Beacon",
+  );
+  await page.waitForTimeout(300);
+  await page.mouse.move(0, 0);
+  const original = await page.locator("canvas").screenshot();
+  const moved = hierarchyNodes();
+  moved[4].position = [1.4, 0, 0];
+  await page.locator("#file").setInputFiles(upload(hierarchyFixture(moved)));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await page.waitForTimeout(300);
+  expect((await page.locator("canvas").screenshot()).equals(original)).toBe(
+    false,
+  );
+  const hidden = hierarchyNodes();
+  hidden[2].active = false;
+  await page.locator("#file").setInputFiles(upload(hierarchyFixture(hidden)));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await expect(page.locator("#mesh-stats")).toContainText(
+    "9,396 vertices · 3 materials · 1 parts",
+  );
+  await expect(page.locator("#report")).toContainText("2 部品を非アクティブ");
+  const named = hierarchyNodes();
+  named[4].name = "<img src=x onerror=alert(1)>";
+  await page.locator("#file").setInputFiles(upload(hierarchyFixture(named)));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await expect(page.locator("#report")).toContainText(
+    "<img src=x onerror=alert(1)>",
+  );
+  await expect(page.locator("#report img")).toHaveCount(0);
+  const broken = hierarchyNodes();
+  broken[3].parent = 99;
+  await page.locator("#file").setInputFiles(upload(hierarchyFixture(broken)));
+  await expect(page.getByRole("alert")).toContainText("親子参照");
+  await page.locator("#file").setInputFiles(upload(hierarchyFixture()));
+  await expect(page.getByRole("status")).toContainText("読み込み完了");
+  await page.screenshot({
+    path: "docs/evidence/orbit-hierarchy.png",
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
 });

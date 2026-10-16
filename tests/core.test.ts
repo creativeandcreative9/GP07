@@ -25,8 +25,11 @@ function modified(find: string, change: (value: string) => string) {
 describe("original unitypackage integration", () => {
   it("resolves GUID, mesh fileID, material slots and texture through the real FBX loader", async () => {
     const scene = await parsePackage(fixture());
-    expect(scene.source.mesh).toEqual({ guid: GUID.mesh, fileID: 4300000 });
-    expect(scene.source.materials.map((r) => r.guid)).toEqual([
+    expect(scene.source.renderers[0].mesh).toEqual({
+      guid: GUID.mesh,
+      fileID: 4300000,
+    });
+    expect(scene.source.renderers[0].materials.map((r) => r.guid)).toEqual([
       GUID.body,
       GUID.face,
       GUID.accent,
@@ -85,14 +88,20 @@ describe("original unitypackage integration", () => {
       ),
     ).rejects.toThrow("外部画像");
   });
-  it("rejects non-identity prefab transforms explicitly", async () => {
-    await expect(
+  it("applies non-identity prefab scales", async () => {
+    const [original, scaled] = await Promise.all([
+      parsePackage(fixture()),
       parsePackage(
         modified(`${GUID.prefab}/asset`, (s) =>
           s.replace("m_LocalScale: {x: 1", "m_LocalScale: {x: 2"),
         ),
       ),
-    ).rejects.toThrow("Transform");
+    ]);
+    for (let i = 0; i < original.mesh.positions.length; i++)
+      expect(scaled.mesh.positions[i]).toBeCloseTo(
+        original.mesh.positions[i] * (i % 3 === 0 ? 2 : 1),
+        4,
+      );
   });
 });
 

@@ -60,7 +60,8 @@ export async function normalizeBinaryFbx(
     outputSize = 0,
     nodes = 0,
     properties = 0,
-    scalars = 0;
+    scalars = 0,
+    polygonVertices = 0;
   const chunks: Uint8Array[] = [];
   function emit(chunk: Uint8Array) {
     outputSize += chunk.length;
@@ -138,10 +139,11 @@ export async function normalizeBinaryFbx(
       "FBX 配列が上限を超えています。",
     );
     check(encoding === 0 || encoding === 1, "FBX 配列の圧縮方式が不正です。");
+    if (name === "PolygonVertexIndex") polygonVertices += count;
     check(
       name !== "PolygonVertexIndex" ||
         (count > 0 &&
-          count <= LIMITS.vertices &&
+          polygonVertices <= LIMITS.vertices &&
           count % 3 === 0 &&
           type === "i"),
       "FBX は 500,000 頂点以下の三角形が必要です。",

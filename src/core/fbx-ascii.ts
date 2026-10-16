@@ -30,14 +30,15 @@ export function validateAsciiFbx(bytes: Uint8Array): void {
     );
   }
   check(depth === 0, "FBX の括弧が不正です。");
-  let scalars = 0;
+  let scalars = 0,
+    polygonVertices = 0;
   for (const match of source.matchAll(
     /(\w+):\s*\*(\d+)\s*\{\s*a:\s*([^}]*)\}/g,
   )) {
     const count = Number(match[2]);
     scalars += count;
     check(
-      scalars <= 4_500_000 && count <= LIMITS.indices,
+      scalars <= LIMITS.fbxScalars && count <= LIMITS.indices,
       "FBX 配列が上限を超えています。",
     );
     const values = match[3].trim().split(",");
@@ -52,8 +53,9 @@ export function validateAsciiFbx(bytes: Uint8Array): void {
       "FBX 配列の長さまたは数値が不正です。",
     );
     if (match[1] === "PolygonVertexIndex") {
+      polygonVertices += count;
       check(
-        count <= LIMITS.vertices &&
+        polygonVertices <= LIMITS.vertices &&
           count % 3 === 0 &&
           values.every(
             (v, i) =>

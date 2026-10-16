@@ -79,7 +79,13 @@ function report(data: SceneData) {
   target.append(warn);
   const refs = document.createElement("p");
   refs.className = "reference";
-  refs.textContent = `Mesh fileID ${data.source.mesh.fileID} → ${data.mesh.name} · ${data.materials.length} 素材スロットを GUID で解決 · ${data.mesh.format}`;
+  refs.textContent = `${data.source.renderers.length} 部品 · ${data.materials.length} 材質を GUID で解決 · ${data.mesh.format}`;
+  for (const part of data.source.renderers) {
+    const row = document.createElement("p");
+    row.className = "reference";
+    row.textContent = `${part.path} · Mesh fileID ${part.mesh.fileID} → ${part.meshName}`;
+    target.append(row);
+  }
   target.append(refs);
   const disclosure = document.createElement("details"),
     summary = document.createElement("summary");
@@ -116,7 +122,7 @@ async function load(file: File | "demo") {
     let bytes: ArrayBuffer, name: string;
     if (file === "demo") {
       fetchController = new AbortController();
-      const response = await fetch("/fixtures/orbit-binary.unitypackage", {
+      const response = await fetch("/fixtures/orbit-hierarchy.unitypackage", {
         signal: fetchController.signal,
       });
       if (!response.ok) throw new Error("デモを取得できませんでした。");
@@ -150,7 +156,7 @@ async function load(file: File | "demo") {
         el("loading").hidden = true;
         el("model-name").textContent = name;
         el("mesh-stats").textContent =
-          `${scene.vertices.toLocaleString()} vertices · ${scene.materials.length} materials`;
+          `${scene.vertices.toLocaleString()} vertices · ${scene.materials.length} materials · ${scene.source.renderers.length} parts`;
         controlsEnabled(true);
         report(scene);
         const rgb = scene.materials[0].color

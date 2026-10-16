@@ -4,6 +4,7 @@ import { gzipSync, deflateSync } from "node:zlib";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { binaryFbx } from "./fbx-binary.mjs";
+import { prefabText } from "./prefab-fixture.mjs";
 
 export const GUID = {
   mesh: "a1000000000000000000000000000001",
@@ -12,6 +13,7 @@ export const GUID = {
   accent: "b3000000000000000000000000000003",
   texture: "c1000000000000000000000000000001",
   prefab: "d1000000000000000000000000000001",
+  gold: "b4000000000000000000000000000004",
 };
 const vertices = [],
   normals = [],
@@ -263,7 +265,7 @@ export function fixture() {
   return gzipSync(tar(fixtureEntries()), { level: 9 });
 }
 
-export function binaryMesh(compressed = true) {
+export function binaryMesh(compressed = true, extra = false) {
   const n = (name, props = [], children = []) => ({ name, props, children });
   const s = (value) => ["S", value];
   const i = (value) => ["I", value];
@@ -287,6 +289,14 @@ export function binaryMesh(compressed = true) {
     );
   // The same six-decimal values as the ASCII fixture, for exact geometry comparison.
   const rounded = (values) => values.map((v) => Number(v.toFixed(6)));
+  const box = new BoxGeometry(30, 30, 30).toNonIndexed();
+  const bp = Array.from(box.getAttribute("position").array);
+  const bn = Array.from(box.getAttribute("normal").array);
+  const bu = Array.from(box.getAttribute("uv").array);
+  const bi = Array.from({ length: bp.length / 3 }, (_, k) =>
+    k % 3 === 2 ? -k - 1 : k,
+  );
+  box.dispose();
   return binaryFbx(
     [
       n(
@@ -361,6 +371,49 @@ export function binaryMesh(compressed = true) {
               n("Culling", [s("CullingOff")]),
             ],
           ),
+          ...(extra
+            ? [
+                n(
+                  "Geometry",
+                  [l(101), s("Beacon\0\x01Geometry"), s("Mesh")],
+                  [
+                    n("Vertices", [["d", bp]]),
+                    n("PolygonVertexIndex", [["i", bi]]),
+                    layer(
+                      "LayerElementNormal",
+                      "ByPolygonVertex",
+                      "Normals",
+                      bn,
+                      "d",
+                    ),
+                    layer("LayerElementUV", "ByPolygonVertex", "UV", bu, "d"),
+                    layer(
+                      "LayerElementMaterial",
+                      "ByPolygon",
+                      "Materials",
+                      Array(bi.length / 3).fill(0),
+                      "i",
+                    ),
+                  ],
+                ),
+                n(
+                  "Model",
+                  [l(201), s("Beacon\0\x01Model"), s("Mesh")],
+                  [
+                    n("Version", [i(232)]),
+                    n(
+                      "Properties70",
+                      [],
+                      [
+                        p("Lcl Translation", "Lcl Translation", [0, 0, 0]),
+                        p("Lcl Rotation", "Lcl Rotation", [0, 0, 0]),
+                        p("Lcl Scaling", "Lcl Scaling", [1, 1, 1]),
+                      ],
+                    ),
+                  ],
+                ),
+              ]
+            : []),
           ...[0, 1, 2].map((slot) =>
             n(
               "Material",
@@ -383,6 +436,13 @@ export function binaryMesh(compressed = true) {
           [300, 200],
           [301, 200],
           [302, 200],
+          ...(extra
+            ? [
+                [101, 201],
+                [201, 0],
+                [300, 201],
+              ]
+            : []),
         ].map(([a, b]) => n("C", [s("OO"), l(a), l(b)])),
       ),
     ],
@@ -392,6 +452,67 @@ export function binaryMesh(compressed = true) {
 
 export function binaryFixture(compressed = true) {
   return gzipSync(tar(fixtureEntries(binaryMesh(compressed))), { level: 9 });
+}
+
+export function hierarchyNodes() {
+  return [
+    {
+      name: "OrbitRig",
+      position: [0.15, 0, 0],
+      rotation: [0, Math.sin(Math.PI / 12), 0, Math.cos(Math.PI / 12)],
+    },
+    {
+      name: "Orbit",
+      parent: 0,
+      mesh: { guid: GUID.mesh, fileID: 4300000 },
+      materials: [GUID.body, GUID.face, GUID.accent],
+    },
+    {
+      name: "Accessories",
+      parent: 0,
+      position: [0, 1.2, 0],
+      rotation: [0, 0, Math.sin(Math.PI / 8), Math.cos(Math.PI / 8)],
+    },
+    {
+      name: "LeftBeacon",
+      parent: 2,
+      position: [-0.75, 0, 0],
+      scale: [0.65, 1.1, 0.65],
+      mesh: { guid: GUID.mesh, fileID: 4300001 },
+      materials: [GUID.gold],
+    },
+    {
+      name: "RightBeacon",
+      parent: 2,
+      position: [0.75, 0, 0],
+      scale: [-0.65, 1.1, 0.65],
+      mesh: { guid: GUID.mesh, fileID: 4300001 },
+      materials: [GUID.gold],
+    },
+  ];
+}
+
+export function hierarchyEntries(nodes = hierarchyNodes()) {
+  const entries = fixtureEntries(binaryMesh(true, true)).map(([name, data]) => [
+    name,
+    name === `${GUID.prefab}/asset`
+      ? prefabText(nodes)
+      : name === `${GUID.mesh}/asset.meta`
+        ? String(data) + "  - first: {43: 4300001}\n    second: Beacon\n"
+        : data,
+  ]);
+  return [
+    ...entries,
+    [`${GUID.gold}/pathname`, "Assets/GP07/Gold.mat\n"],
+    [`${GUID.gold}/asset`, material("Beacon gold", [1, 0.64, 0.15])],
+    [
+      `${GUID.gold}/asset.meta`,
+      `fileFormatVersion: 2\nguid: ${GUID.gold}\nNativeFormatImporter: {}\n`,
+    ],
+  ];
+}
+export function hierarchyFixture(nodes = hierarchyNodes()) {
+  return gzipSync(tar(hierarchyEntries(nodes)), { level: 9 });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -404,5 +525,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await writeFile(new URL("orbit-binary.unitypackage", dir), binary);
   console.log(
     `Generated original binary Orbit fixture: ${binary.length} bytes`,
+  );
+  const hierarchy = hierarchyFixture();
+  await writeFile(new URL("orbit-hierarchy.unitypackage", dir), hierarchy);
+  console.log(
+    `Generated original hierarchy fixture: ${hierarchy.length} bytes`,
   );
 }

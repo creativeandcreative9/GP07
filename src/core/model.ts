@@ -1,111 +1,12 @@
-import { BufferAttribute, LoadingManager, Mesh } from "three";
-import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+import { Matrix4 } from "three";
 import { indexAssets, unpack } from "./archive";
+import { parseFbx } from "./fbx";
+import { combineParts, transformedPart } from "./geometry";
 import { imageInfo } from "./image";
-import { isBinaryFbx, normalizeBinaryFbx } from "./fbx-binary";
-import { validateAsciiFbx } from "./fbx-ascii";
-import {
-  documents,
-  list,
-  number,
-  readMaterial,
-  record,
-  ref,
-  validateMeta,
-} from "./unity";
+import { readPrefab } from "./prefab";
+import { list, number, readMaterial, record, validateMeta } from "./unity";
 import { check, LIMITS } from "./types";
-import type { Asset, MeshData, SceneData } from "./types";
-
-export async function parseMesh(
-  bytes: Uint8Array,
-  name: string,
-  slots: number,
-): Promise<MeshData> {
-  check(bytes.length <= LIMITS.fbx, "FBX は 16 MiB 以下が必要です。");
-  const binary = isBinaryFbx(bytes);
-  const buffer = binary
-    ? await normalizeBinaryFbx(bytes)
-    : (validateAsciiFbx(bytes), new Uint8Array(bytes).buffer);
-  const manager = new LoadingManager();
-  manager.setURLModifier(() => {
-    throw new Error("FBX の外部リソース読み込みは禁止されています。");
-  });
-  const root = new FBXLoader(manager).parse(buffer, "");
-  const meshes: Mesh[] = [];
-  root.traverse((object) => {
-    if (object instanceof Mesh) meshes.push(object);
-  });
-  check(meshes.length === 1, "初版は FBX 内に単一の静的メッシュが必要です。");
-  const mesh = meshes[0];
-  check(
-    !("isSkinnedMesh" in mesh) && mesh.geometry.name === name,
-    "FBX subasset と fileID の対応が解決できません。",
-  );
-  root.updateMatrixWorld(true);
-  let geometry = mesh.geometry;
-  if (geometry.index) geometry = geometry.toNonIndexed();
-  check(
-    geometry.getAttribute("position")?.count <= LIMITS.vertices,
-    "頂点数が 500,000 の上限を超えています。",
-  );
-  geometry.applyMatrix4(mesh.matrixWorld);
-  // FBX coordinates are treated as Y-up; reflection matches Unity's handedness.
-  geometry.scale(-1, 1, 1);
-  const p = geometry.getAttribute("position");
-  // Reflecting positions reverses winding; swap vertices in every triangle.
-  for (const attribute of Object.values(geometry.attributes)) {
-    check(
-      attribute instanceof BufferAttribute,
-      "Interleaved geometry は未対応です。",
-    );
-    for (let i = 0; i < attribute.count; i += 3) {
-      for (let c = 0; c < attribute.itemSize; c++) {
-        const a = (i + 1) * attribute.itemSize + c,
-          b = (i + 2) * attribute.itemSize + c;
-        const tmp = attribute.array[a];
-        attribute.array[a] = attribute.array[b];
-        attribute.array[b] = tmp;
-      }
-    }
-  }
-  check(p.count > 0 && p.count % 3 === 0, "三角形メッシュが必要です。");
-  if (!geometry.getAttribute("normal")) geometry.computeVertexNormals();
-  const groups = geometry.groups.length
-    ? geometry.groups.map((g) => ({
-        ...g,
-        materialIndex: g.materialIndex ?? 0,
-      }))
-    : [{ start: 0, count: p.count, materialIndex: 0 }];
-  let end = 0;
-  for (const group of groups) {
-    check(
-      group.start === end &&
-        group.count % 3 === 0 &&
-        group.materialIndex >= 0 &&
-        group.materialIndex < slots,
-      "FBX の素材スロットが Prefab と一致しません。",
-    );
-    end += group.count;
-  }
-  check(end === p.count, "素材スロットが全ポリゴンを覆っていません。");
-  const result = {
-    name,
-    format: binary ? "Binary FBX 7.4" : "ASCII FBX 7.4",
-    positions: new Float32Array(p.array),
-    normals: new Float32Array(geometry.getAttribute("normal").array),
-    uvs: geometry.getAttribute("uv")
-      ? new Float32Array(geometry.getAttribute("uv").array)
-      : new Float32Array(p.count * 2),
-    groups,
-  };
-  for (const array of [result.positions, result.normals, result.uvs])
-    check(array.every(Number.isFinite), "FBX に非有限の値があります。");
-  geometry.dispose();
-  for (const m of meshes)
-    for (const mat of Array.isArray(m.material) ? m.material : [m.material])
-      mat.dispose();
-  return result;
-}
+import type { Asset, MaterialInfo, MeshData, SceneData } from "./types";
 
 export async function parsePackage(input: Uint8Array): Promise<SceneData> {
   const assets = indexAssets(await unpack(input));
@@ -123,74 +24,101 @@ export async function parsePackage(input: Uint8Array): Promise<SceneData> {
     return asset;
   };
   const prefabs = assets.filter((a) => /\.prefab$/i.test(a.path));
-  check(prefabs.length === 1, "初版は単一の自己完結した Prefab が必要です。");
-  const docs = documents(prefabs[0].data);
-  check(
-    docs.every((d) => [1, 4, 23, 33].includes(d.type)),
-    "Prefab の未対応コンポーネント・Variant を検出しました。",
-  );
-  const ofType = (type: number, key: string) => {
-    const found = docs.filter((d) => d.type === type);
+  check(prefabs.length === 1, "単一の自己完結した Prefab が必要です。");
+  const instances = readPrefab(prefabs[0].data, warnings);
+  const decoded = new Map<string, MeshData[]>();
+  let decodedVertices = 0,
+    vertices = 0;
+  const materials: MaterialInfo[] = [];
+  const materialIndex = new Map<string, number>();
+  const parts: { mesh: MeshData; slots: number[] }[] = [];
+  const renderers: SceneData["source"]["renderers"] = [];
+  for (const instance of instances) {
+    const fbx = get(instance.mesh.guid, /\.fbx$/i);
+    const importer = record(metadata.get(fbx.guid)?.ModelImporter);
     check(
-      found.length === 1,
-      "単一 GameObject・Transform・MeshFilter・MeshRenderer のみ対応しています。",
+      (importer.useFileScale ?? 1) === 1,
+      "ModelImporter.useFileScale: 0 は未対応です。",
     );
-    return { id: found[0].id, data: record(found[0].value[key]) };
-  };
-  const go = ofType(1, "GameObject"),
-    transform = ofType(4, "Transform");
-  const filter = ofType(33, "MeshFilter"),
-    renderer = ofType(23, "MeshRenderer");
-  const components = list(go.data.m_Component)
-    .map((c) => ref(record(c).component).fileID)
-    .sort();
-  check(
-    JSON.stringify(components) ===
-      JSON.stringify([transform.id, filter.id, renderer.id].sort()),
-    "Prefab component 参照が一致しません。",
-  );
-  for (const c of [transform, filter, renderer])
+    const importScale = number(importer.globalScale ?? 1);
     check(
-      ref(c.data.m_GameObject).fileID === go.id,
-      "GameObject 参照が一致しません。",
+      importScale >= 0.001 && importScale <= 1000,
+      "ModelImporter.globalScale は 0.001–1000 が必要です。",
     );
-  check(
-    ref(transform.data.m_Father).fileID === 0 &&
-      list(transform.data.m_Children).length === 0,
-    "ネストした Prefab は未対応です。",
-  );
-  for (const [key, expected] of [
-    ["m_LocalPosition", [0, 0, 0]],
-    ["m_LocalScale", [1, 1, 1]],
-    ["m_LocalRotation", [0, 0, 0, 1]],
-  ] as const) {
-    const value = record(transform.data[key]);
+    const names = list(importer.internalIDToNameTable)
+      .filter(
+        (item) => record(record(item).first)["43"] === instance.mesh.fileID,
+      )
+      .map((item) => String(record(item).second));
     check(
-      expected.every((n, i) => number(value[["x", "y", "z", "w"][i]]) === n),
-      "初版の Prefab Transform は位置0・回転0・スケール1が必要です。",
+      names.length === 1,
+      "ModelImporter の mesh fileID が欠落・曖昧です。",
     );
+    let meshes = decoded.get(fbx.guid);
+    if (!meshes) {
+      meshes = await parseFbx(fbx.data);
+      decodedVertices += meshes.reduce(
+        (sum, m) => sum + m.positions.length / 3,
+        0,
+      );
+      check(
+        decodedVertices <= LIMITS.vertices,
+        "読み込む FBX の合計頂点数が 500,000 の上限を超えています。",
+      );
+      decoded.set(fbx.guid, meshes);
+    }
+    const matches = meshes.filter((m) => m.name === names[0]);
+    check(
+      matches.length === 1,
+      "FBX subasset と fileID の対応が欠落・曖昧です。",
+    );
+    const mesh = matches[0];
+    vertices += mesh.positions.length / 3;
+    check(
+      vertices <= LIMITS.vertices,
+      "部品の合計頂点数が 500,000 の上限を超えています。",
+    );
+    const slots = instance.materials.map((r) => {
+      check(
+        r.fileID === 2100000,
+        "Material fileID は 2100000 のみ対応しています。",
+      );
+      const asset = get(r.guid, /\.mat$/i);
+      let index = materialIndex.get(asset.guid);
+      if (index === undefined) {
+        check(
+          materials.length < LIMITS.materials,
+          "材質の合計が 128 の上限を超えています。",
+        );
+        index = materials.length;
+        materials.push(readMaterial(asset, warnings));
+        materialIndex.set(asset.guid, index);
+      }
+      return index;
+    });
+    parts.push({
+      mesh: transformedPart(
+        mesh,
+        instance.world
+          .clone()
+          .multiply(
+            new Matrix4().makeScale(importScale, importScale, importScale),
+          ),
+      ),
+      slots,
+    });
+    renderers.push({
+      name: instance.name,
+      path: instance.path,
+      meshName: mesh.name,
+      transformID: instance.transformID,
+      mesh: instance.mesh,
+      materials: instance.materials,
+      matrix: instance.world.toArray(),
+      importScale,
+    });
   }
-  const meshRef = ref(filter.data.m_Mesh);
-  const fbx = get(meshRef.guid, /\.fbx$/i);
-  const importer = record(metadata.get(fbx.guid)?.ModelImporter);
-  const table = list(importer.internalIDToNameTable);
-  const names = table
-    .filter((item) => record(record(item).first)["43"] === meshRef.fileID)
-    .map((item) => String(record(item).second));
-  check(names.length === 1, "ModelImporter の mesh fileID が欠落・曖昧です。");
-  const materialRefs = list(renderer.data.m_Materials).map(ref);
-  check(
-    materialRefs.length > 0 && materialRefs.length <= 32,
-    "素材スロット数が不正です。",
-  );
-  const materials = materialRefs.map((r) => {
-    check(
-      r.fileID === 2100000,
-      "Material fileID は 2100000 のみ対応しています。",
-    );
-    return readMaterial(get(r.guid, /\.mat$/i), warnings);
-  });
-  const textures = [];
+  const textures: SceneData["textures"] = [];
   let pixels = 0;
   for (const guid of new Set(
     materials.map((m) => m.textureGuid).filter((g): g is string => !!g),
@@ -204,14 +132,13 @@ export async function parsePackage(input: Uint8Array): Promise<SceneData> {
     );
     textures.push({ guid, bytes: asset.data, mime: info.mime });
   }
-  const mesh = await parseMesh(fbx.data, names[0], materials.length);
   const ignored = assets.filter((a) => /\.(cs|dll|shader|js)$/i.test(a.path));
   if (ignored.length)
     warnings.push(
       `${ignored.length} 件のコード・シェーダーを実行せず無視しました。`,
     );
   return {
-    mesh,
+    mesh: combineParts(parts),
     materials,
     textures,
     warnings,
@@ -220,7 +147,7 @@ export async function parsePackage(input: Uint8Array): Promise<SceneData> {
       path: a.path,
       bytes: a.data.length,
     })),
-    source: { mesh: meshRef, materials: materialRefs, prefab: prefabs[0].path },
-    vertices: mesh.positions.length / 3,
+    source: { prefab: prefabs[0].path, renderers },
+    vertices,
   };
 }

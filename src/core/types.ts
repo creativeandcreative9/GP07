@@ -9,6 +9,10 @@ export const LIMITS = {
   fbx: 16 * 1024 ** 2,
   fbxExpanded: 64 * 1024 ** 2,
   fbxScalars: 4_500_000,
+  meshes: 32,
+  prefabNodes: 128,
+  prefabDepth: 32,
+  materials: 128,
   imageSide: 4096,
   pixels: 32_000_000,
   timeout: 15_000,
@@ -52,7 +56,19 @@ export interface SceneData {
   textures: { guid: string; bytes: Uint8Array; mime: string }[];
   warnings: string[];
   assets: { guid: string; path: string; bytes: number }[];
-  source: { mesh: Ref; materials: Ref[]; prefab: string };
+  source: {
+    prefab: string;
+    renderers: {
+      name: string;
+      path: string;
+      meshName: string;
+      mesh: Ref;
+      materials: Ref[];
+      transformID: number;
+      matrix: number[];
+      importScale: number;
+    }[];
+  };
   vertices: number;
 }
 export function check(condition: unknown, message: string): asserts condition {
